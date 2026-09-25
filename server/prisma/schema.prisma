@@ -1,0 +1,518 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String             @id @default(uuid())
+  email        String             @unique
+  name         String
+  passwordHash String?
+  googleId     String?            @unique
+  role         String?            // WORKER < SPECIALIST < SIRDAR < OVERMAN < OFFICER < ASSISTANT_MANAGER < MINE_MANAGER < OWNER < DGMS; null until onboarding
+  officerType  String?            // OFFICER only: SAFETY, VENTILATION, ELECTRICAL, MECHANICAL, SURVEY, BLASTING, OTHER
+  trade        String?            // WORKER only: DRILLER, ELECTRICIAN, FITTER, BLASTER, OPERATOR, HELPER, OTHER
+  specialistType String?          // SPECIALIST only: BLASTER, SHOT_FIRER, SURVEYOR, MAGAZINE_INCHARGE, WINDING_ENGINE_OPERATOR, ELECTRICAL_SUPERVISOR, OTHER
+  shift        String?            // WORKER, SIRDAR, OVERMAN: A, B or C
+  districtId   String?            // WORKER, SIRDAR: the district they work in
+  district     District?          @relation(fields: [districtId], references: [id])
+  contractId   String?            // WORKER, SIRDAR employed through a contractor; null = the mine's own staff
+  contract     Contract?          @relation(fields: [contractId], references: [id])
+  trainingValidUntil DateTime?    // vocational training certificate (Mines Vocational Training Rules); contract workers can't work without it
+  phone        String?
+  isAdmin      Boolean            @default(false)
+  status       String             @default("NEW") // NEW, PENDING, APPROVED, REJECTED
+  reviewNote   String?
+  reviewedAt   DateTime?
+  badgeNumber  String?
+  mineId       String?
+  mine         Mine?              @relation(fields: [mineId], references: [id])
+  department   String?
+  points       Int                @default(0)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  safetyReports SafetyReport[]
+  grievances    Grievance[]
+  pointsHistory RecognitionPoint[]
+  badges        UserBadge[]
+  notifications Notification[]
+  attendance    Attendance[]
+  escalations   Escalation[]
+  inspectionsAssigned Inspection[] @relation("InspectionAssignee")
+  shiftReports  ShiftReport[]
+  fieldReports  FieldReport[]
+}
+
+model Mine {
+  id              String         @id @default(uuid())
+  code            String         @unique
+  name            String
+  company         String?        // owner company, e.g. Bharat Coking Coal Ltd; an Owner sees every mine of their company
+  shiftStartHour  Int            @default(6) // shift A starts at this hour (India time); B and C follow every 8 hours
+  region          String
+  state           String
+  locality        String?
+  latitude        Float?
+  longitude       Float?
+  radiusMeters    Int            @default(500) // attendance geofence around the pin
+  complianceScore Float          @default(92.5)
+  activeWorkers   Int            @default(420)
+  status          String         @default("OPERATIONAL") // OPERATIONAL, CAUTION, AUDIT_REQUIRED
+  createdAt       DateTime       @default(now())
+
+  districts       District[]
+  shiftReports    ShiftReport[]
+  contracts       Contract[]
+  fieldReports    FieldReport[]
+  users           User[]
+  safetyReports   SafetyReport[]
+  grievances      Grievance[]
+  inspections     Inspection[]
+  incidents       Incident[]
+  sosAlerts       SosAlert[]
+  announcements   Announcement[]
+  attendance      Attendance[]
+  escalations     Escalation[]
+  complianceRules ComplianceRule[] @relation("ComplianceRuleMines")
+  complianceChecks ComplianceCheck[]
+}
+
+// One row per person per day. Check-in is accepted only inside the mine's geofence.
+model Attendance {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id])
+  mineId           String
+  mine             Mine      @relation(fields: [mineId], references: [id])
+  date             String    // YYYY-MM-DD, India time
+  checkInAt        DateTime  // when the phone captured the position (or when a supervisor marked it)
+  checkInLat       Float?
+  checkInLng       Float?
+  checkInAccuracy  Float?
+  checkInDistance  Float?    // metres from the mine pin; null for manual marks
+  source           String    @default("GPS") // GPS, MANUAL
+  markedById       String?   // supervisor who marked a MANUAL record
+  markedByName     String?
+  note             String?   // reason for a manual mark
+  checkOutAt       DateTime?
+  checkOutLat      Float?
+  checkOutLng      Float?
+  checkOutDistance Float?
+  syncedLate       Boolean   @default(false) // captured offline and uploaded later
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@unique([userId, date])
+  @@index([mineId, date])
+}
+
+// A working section of one mine ("section" or "pit" in opencast mines). Each has a Sirdar per shift.
+model District {
+  id          String         @id @default(uuid())
+  mineId      String
+  mine        Mine           @relation(fields: [mineId], references: [id])
+  name        String         // e.g. "District 2"
+  location    String?        // e.g. "Seam IX, south side, -180 m"
+  createdAt   DateTime       @default(now())
+
+  users         User[]
+  safetyReports SafetyReport[]
+  sosAlerts     SosAlert[]
+  shiftReports  ShiftReport[]
+  contracts     Contract[]
+  fieldReports  FieldReport[]
+}
+
+// A technical report from a specialist (a blast report, a survey, a winder test...). It can hold text, a table
+// and photos, in any mix. Someone from the Overman up reads it and marks it reviewed, or sends it back.
+model FieldReport {
+  id           String    @id // e.g. RPT-2026-00031
+  mineId       String
+  mine         Mine      @relation(fields: [mineId], references: [id])
+  districtId   String?
+  district     District? @relation(fields: [districtId], references: [id])
+  authorId     String
+  author       User      @relation(fields: [authorId], references: [id])
+  reportType   String    // BLAST, SURVEY, WINDING, ELECTRICAL, MAGAZINE, OTHER
+  title        String
+  workDate     String    // YYYY-MM-DD the work was done
+  body         String?   // free text
+  tableData    String?   // JSON { columns: string[], rows: string[][] }
+  photos       String    @default("[]") // JSON array of photo URLs
+  status       String    @default("SUBMITTED") // SUBMITTED -> REVIEWED, or RETURNED (edited and resubmitted)
+  reviewedByName String?
+  reviewedAt   DateTime?
+  reviewNote   String?
+  recordHash   String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([mineId, createdAt])
+}
+
+// A company hired to do work at mines (overburden removal, transport, support work, an MDO...).
+model Contractor {
+  id          String     @id @default(uuid())
+  name        String     @unique
+  contactName String?
+  phone       String?
+  createdAt   DateTime   @default(now())
+
+  contracts   Contract[]
+}
+
+// One piece of work a contractor does at one mine (a work order). The mine owner and manager stay
+// legally responsible for the safety of everyone working under it.
+model Contract {
+  id            String     @id // e.g. CON-2026-00012
+  mineId        String
+  mine          Mine       @relation(fields: [mineId], references: [id])
+  contractorId  String
+  contractor    Contractor @relation(fields: [contractorId], references: [id])
+  title         String     // what the work is
+  workType      String     // MDO, OB_REMOVAL, COAL_TRANSPORT, SUPPORT_WORK, MACHINERY_HIRE, CIVIL, ELECTRICAL, OTHER
+  reference     String?    // letter of acceptance / agreement / work order number
+  districtId    String?    // where the work is, when it is one district
+  district      District?  @relation(fields: [districtId], references: [id])
+  startDate     DateTime
+  endDate       DateTime
+  status        String     @default("ACTIVE") // ACTIVE, SUSPENDED, ENDED
+  statusNote    String?
+  createdByName String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  workers       User[]
+  incidents     Incident[]
+
+  @@index([mineId, status])
+}
+
+// The Sirdar's pre-shift inspection of one district. Workers of that district and shift can check in
+// only after it is submitted and the district is not declared unsafe.
+model ShiftReport {
+  id           String    @id @default(uuid())
+  mineId       String
+  mine         Mine      @relation(fields: [mineId], references: [id])
+  districtId   String
+  district     District  @relation(fields: [districtId], references: [id])
+  date         String    // YYYY-MM-DD India time; a night shift belongs to the day it starts
+  shift        String    // A, B, C
+  sirdarId     String
+  sirdar       User      @relation(fields: [sirdarId], references: [id])
+  status       String    // SAFE, RESTRICTED (some places fenced off), UNSAFE (nobody goes in)
+  checks       String    @default("{}") // JSON: { GAS: { ok, note }, ROOF: ..., VENTILATION: ..., EQUIPMENT: ... }
+  methanePct   Float?    // highest reading in the district
+  restrictions String?   // places fenced off
+  notes        String?
+  history      String    @default("[]") // JSON: status changes after submission [{ at, by, status, note }]
+  submittedAt  DateTime  @default(now())
+  seenById     String?   // Overman (or above) who read it
+  seenByName   String?
+  seenAt       DateTime?
+  seenNote     String?
+  handoverNote String?   // written at the end of the shift for the next Sirdar
+  handoverAt   DateTime?
+  recordHash   String?
+
+  @@unique([districtId, date, shift])
+  @@index([mineId, date, shift])
+}
+
+model SafetyReport {
+  id                   String      @id // e.g. SAFE-2026-00124
+  reporterId           String?
+  reporter             User?       @relation(fields: [reporterId], references: [id])
+  mineId               String
+  mine                 Mine        @relation(fields: [mineId], references: [id])
+  districtId           String?
+  district             District?   @relation(fields: [districtId], references: [id])
+  category             String      // PPE, MACHINERY, ELECTRICAL, FIRE, VENTILATION, GAS, STRUCTURAL, TRANSPORTATION, ENVIRONMENTAL, OTHER
+  severity             String      // LOW, MEDIUM, HIGH, CRITICAL
+  description          String
+  immediateActionTaken String?
+  imageUrl             String?
+  status               String      @default("SUBMITTED") // SUBMITTED -> ASSIGNED -> FIXED (waiting for a check) -> RESOLVED
+  assignedOfficer      String?
+  fixedById            String?
+  fixedByName          String?
+  fixedAt              DateTime?
+  fixNote              String?
+  verifiedByName       String?     // who confirmed the fix (or sent it back)
+  verifiedAt           DateTime?
+  verifyNote           String?
+  inspectionId         String?     // inspection sent to check the fix
+  recordHash           String?
+  rewardPointsAwarded  Boolean     @default(false)
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+}
+
+model Grievance {
+  id             String    @id // e.g. GRV-2026-8F4A21
+  trackingCode   String    @unique
+  anonymityType  String    @default("ANONYMOUS") // ANONYMOUS, CONFIDENTIAL, IDENTIFIED
+  submitterId    String?
+  submitter      User?     @relation(fields: [submitterId], references: [id])
+  mineId         String
+  mine           Mine      @relation(fields: [mineId], references: [id])
+  category       String    // HARASSMENT, SUPERVISOR_PRESSURE, SAFETY_VIOLATIONS, IGNORED_HAZARDS, MISCONDUCT, UNSAFE_CONDITIONS, OTHER
+  description    String
+  status         String    @default("SUBMITTED") // SUBMITTED, UNDER_REVIEW, ASSIGNED, INVESTIGATION_IN_PROGRESS, ACTION_REQUIRED, RESOLVED, ESCALATED, CLOSED
+  escalationTier String    @default("MINE_OFFICER") // MINE_OFFICER, MINE_MANAGEMENT, CORPORATE, REGULATOR
+  timeline       String    @default("[]") // JSON string of timeline items
+  recordHash     String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model SosAlert {
+  id               String    @id // e.g. SOS-2026-90412
+  workerIdentifier String    // Badge or Anonymous Token
+  triggeredById    String?   // signed-in user who raised it, so responders can call back
+  mineId           String
+  mine             Mine      @relation(fields: [mineId], references: [id])
+  districtId       String?
+  district         District? @relation(fields: [districtId], references: [id])
+  emergencyType    String    // ACCIDENT, MEDICAL_EMERGENCY, FIRE, GAS_HAZARD, EQUIPMENT_FAILURE, UNSAFE_CONDITION, OTHER
+  status           String    @default("ALERT_TRIGGERED") // ALERT_TRIGGERED, ACKNOWLEDGED, TEAM_ASSIGNED, RESPONDING, RESOLVED
+  assignedTeams    String?   // JSON or comma separated teams
+  responderNotes   String?
+  triggeredAt      DateTime  @default(now())
+  resolvedAt       DateTime?
+}
+
+model Inspection {
+  id              String    @id // e.g. INS-2026-00071
+  mineId          String
+  mine            Mine      @relation(fields: [mineId], references: [id])
+  inspectorName   String
+  inspectionType  String    // STATUTORY_QUARTERLY, VENTILATION_AUDIT, ROOF_SUPPORT_CHECK, ELECTRICAL_SAFETY, ROUTINE
+  checklistData   String    // JSON array of checked criteria
+  findings        String
+  violationsCount Int       @default(0)
+  deadline        DateTime? // due date for assigned inspections
+  status          String    @default("SCHEDULED") // SCHEDULED -> SUBMITTED -> COMPLETED | MISSED, or RETURNED to redo
+  recordHash      String?
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
+
+  // Assignment (someone at Overman level or above picks a person and a date)
+  title           String?
+  hazardId        String?   // set when this inspection checks the fix of a hazard
+  assignedToId    String?
+  assignedTo      User?     @relation("InspectionAssignee", fields: [assignedToId], references: [id])
+  assignedById    String?
+  assignedByName  String?
+
+  // Submission by the assignee, with photo proof
+  outcome         String?   // DONE, NOT_DONE
+  submissionNote  String?
+  photos          String    @default("[]") // JSON array of photo URLs
+  submittedAt     DateTime?
+  submitLat       Float?
+  submitLng       Float?
+  submitDistance  Float?    // metres from the mine pin when submitted
+
+  // Review by anyone above the assignee; one decision is enough
+  reviewedById    String?
+  reviewedByName  String?
+  reviewedAt      DateTime?
+  reviewNote      String?
+}
+
+model CorrectiveAction {
+  id                String    @id // e.g. ACT-2026-00042
+  issueId           String
+  issueType         String    // SAFETY_REPORT, INSPECTION, INCIDENT, GRIEVANCE
+  actionRequired    String
+  responsiblePerson String
+  deadline          DateTime
+  priority          String    // LOW, MEDIUM, HIGH, CRITICAL
+  status            String    @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED, OVERDUE
+  evidence          String?
+  verifiedBy        String?
+  createdAt         DateTime  @default(now())
+  completedAt       DateTime?
+}
+
+model Incident {
+  id                 String    @id // e.g. INC-2026-00015
+  incidentType       String    // METHANE_SPIKE, ROOF_FALL, EQUIPMENT_JAM, MINOR_INJURY, ELECTRICAL_SHORT
+  mineId             String
+  mine               Mine      @relation(fields: [mineId], references: [id])
+  location           String
+  severity           String    // MINOR, SERIOUS, CRITICAL, FATALITY
+  description        String
+  peopleAffected     Int       @default(0)
+  immediateResponse  String
+  rootCause          String?
+  correctiveActionId String?
+  reportedById       String?
+  reportedByName     String?
+  contractId         String?   // contractor involved, if any
+  contract           Contract? @relation(fields: [contractId], references: [id])
+  status             String    @default("INVESTIGATING") // INVESTIGATING, CONTAINED, RESOLVED, CLOSED
+  createdAt          DateTime  @default(now())
+}
+
+model AuditBlock {
+  id              Int       @id @default(autoincrement())
+  blockIndex      Int       @unique
+  previousHash    String
+  currentHash     String
+  timestamp       DateTime  @default(now())
+  recordType      String    // SAFETY_REPORT, GRIEVANCE, INSPECTION, CORRECTIVE_ACTION, SOS_ALERT
+  recordId        String
+  action          String    // CREATED, ESCALATED, STATUS_CHANGED, RESOLVED, VERIFIED
+  performedByRole String
+  payloadHash     String
+  payloadSummary  String
+}
+
+// Stores the generated narrative and the analytics snapshot it interpreted so
+// admins can revisit evidence-backed analyses after a reload.
+model GovernanceAnalysis {
+  id            String   @id @default(uuid())
+  requestedById String
+  requestedAt   DateTime @default(now())
+  scope         String   @default("all_mines")
+  mineIds       String   // JSON array of mine IDs
+  questionHash  String
+  analysis      String   // JSON object returned by the model
+  analytics     String   // JSON snapshot used to produce the analysis
+
+  @@index([requestedAt])
+}
+
+// Admin-configured requirements. A rule with no applicableMines is global.
+// sourceReference should identify a verified source or explicitly say DEMO/CONFIGURED.
+model ComplianceRule {
+  id                  String    @id @default(uuid())
+  code                String    @unique
+  title               String
+  description         String
+  category            String
+  frequency           String
+  severity            String    @default("MEDIUM")
+  evaluationType      String    // INSPECTION_COUNT, CORRECTIVE_ACTION_DEADLINE
+  configuration       String    @default("{}") // JSON string for deterministic evaluator parameters
+  requiredEvidenceType String?
+  sourceReference     String
+  active              Boolean   @default(true)
+  applicableMines     Mine[]    @relation("ComplianceRuleMines")
+  checks              ComplianceCheck[]
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([active, category])
+}
+
+// One deterministic evaluation result per rule/mine/stable period key.
+model ComplianceCheck {
+  id                    String         @id @default(uuid())
+  ruleId                String
+  rule                  ComplianceRule @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+  mineId                String
+  mine                  Mine           @relation(fields: [mineId], references: [id], onDelete: Restrict)
+  periodKey             String
+  periodStart           DateTime
+  periodEnd             DateTime
+  expectedValue         String         // JSON string
+  actualValue           String         // JSON string
+  status                String         // COMPLIANT, PARTIALLY_COMPLIANT, NON_COMPLIANT, OVERDUE, NOT_APPLICABLE, INSUFFICIENT_DATA
+  dueDate               DateTime?
+  evidenceRefs          String         @default("[]") // JSON array of typed existing record IDs
+  violationSummary      String?
+  correctiveActionIds   String         @default("[]") // JSON array of existing action IDs
+  checkedAt             DateTime       @default(now())
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  @@unique([ruleId, mineId, periodKey])
+  @@index([mineId, status, checkedAt])
+  @@index([ruleId, checkedAt])
+}
+
+model RecognitionPoint {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  pointsAwarded Int
+  reason        String
+  verifiedBy    String
+  createdAt     DateTime @default(now())
+}
+
+model UserBadge {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  badgeCode   String   // SAFETY_CHAMPION, HAZARD_HUNTER, COMPLIANCE_LEADER, EARLY_RISK_REPORTER, ZERO_PENDING_ACTIONS
+  title       String
+  icon        String
+  description String
+  awardedAt   DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  type      String   // INFO, WARNING, SOS, RECOGNITION, AUDIT
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Announcement {
+  id        String   @id @default(uuid())
+  mineId    String?
+  mine      Mine?    @relation(fields: [mineId], references: [id])
+  title     String
+  content   String
+  priority  String   // NORMAL, HIGH, URGENT
+  createdAt DateTime @default(now())
+}
+
+// A Sirdar (or anyone above) pushing an incident or SOS up the hierarchy to a chosen level.
+model Escalation {
+  id                 String    @id @default(uuid())
+  recordType         String    // INCIDENT, SOS
+  recordId           String
+  mineId             String
+  mine               Mine      @relation(fields: [mineId], references: [id])
+  summary            String
+  severe             Boolean   @default(false) // critical/fatal incidents and every SOS
+  fromUserId         String
+  fromUser           User      @relation(fields: [fromUserId], references: [id])
+  toRole             String    // OVERMAN, OFFICER, ASSISTANT_MANAGER, MINE_MANAGER, OWNER, DGMS
+  toOfficerType      String?   // narrows OFFICER to one discipline
+  reason             String
+  recipientCount     Int       @default(0)
+  callStatus         String    @default("NONE") // NONE, NOT_CONFIGURED, PLACED, FAILED
+  status             String    @default("OPEN") // OPEN, ACKNOWLEDGED
+  acknowledgedById   String?
+  acknowledgedByName String?
+  acknowledgedAt     DateTime?
+  createdAt          DateTime  @default(now())
+
+  @@index([recordType, recordId])
+  @@index([mineId, toRole, status])
+}
+
+// Uploaded photos (inspection proof, field reports). Kept in the database so they survive redeploys on hosts
+// whose disk is wiped; served at /api/uploads/<id>.
+model Photo {
+  id          String   @id // random UUID plus extension, e.g. "3f9c….jpg"
+  folder      String   // inspections, reports
+  contentType String
+  data        Bytes
+  createdAt   DateTime @default(now())
+}
