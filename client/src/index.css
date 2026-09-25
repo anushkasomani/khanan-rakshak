@@ -1,0 +1,137 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-zinc-950 text-zinc-100 font-sans antialiased;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-zinc-900/40 border border-white/[0.06] rounded-xl;
+  }
+  .card-danger {
+    @apply bg-red-500/[0.04] border border-red-500/20 rounded-xl;
+  }
+  .card-warning {
+    @apply bg-amber-500/[0.04] border border-amber-500/20 rounded-xl;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 h-9 px-3.5 rounded-lg bg-zinc-100 text-zinc-950 text-sm font-medium hover:bg-white active:scale-[0.98] transition disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 h-9 px-3.5 rounded-lg border border-white/10 text-zinc-200 text-sm font-medium hover:bg-white/[0.04] active:scale-[0.98] transition disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 h-9 px-3.5 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-500 active:scale-[0.98] transition disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center h-9 w-9 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.06] active:scale-95 transition;
+  }
+
+  .input {
+    @apply w-full h-9 px-3 rounded-lg bg-zinc-950 border border-white/10 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-white/25 transition-colors;
+  }
+  textarea.input {
+    @apply h-auto py-2;
+  }
+  .label {
+    @apply block text-sm text-zinc-400 mb-1.5;
+  }
+
+  .skeleton {
+    @apply rounded bg-white/[0.06];
+    background-image: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.05) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+
+  .hash-pill {
+    @apply font-mono text-[11px] px-1.5 py-0.5 rounded bg-white/[0.05] text-zinc-400 select-all;
+  }
+}
+
+/* Leaflet, restyled for the dark theme */
+.map-dark .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) grayscale(0.85) brightness(0.8) contrast(0.95);
+}
+.leaflet-container {
+  background: #09090b;
+  font-family: inherit;
+}
+.leaflet-bar a,
+.leaflet-bar a:hover {
+  background: #18181b;
+  color: #e4e4e7;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+.leaflet-bar {
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: none !important;
+}
+.leaflet-control-attribution {
+  background: rgba(9, 9, 11, 0.7) !important;
+  color: #71717a;
+  font-size: 10px;
+}
+.leaflet-control-attribution a {
+  color: #a1a1aa;
+}
+.leaflet-tooltip {
+  background: #18181b;
+  color: #e4e4e7;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: none;
+  font-size: 12px;
+}
+.leaflet-tooltip-top:before {
+  border-top-color: #18181b;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+/* Motion. Lists rise in once when they first render; polling re-renders keep their keys, so rows don't replay. */
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.stagger > * {
+  animation: rise 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.stagger > *:nth-child(2) { animation-delay: 30ms; }
+.stagger > *:nth-child(3) { animation-delay: 60ms; }
+.stagger > *:nth-child(4) { animation-delay: 90ms; }
+.stagger > *:nth-child(5) { animation-delay: 120ms; }
+.stagger > *:nth-child(6) { animation-delay: 150ms; }
+.stagger > *:nth-child(n + 7) { animation-delay: 180ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
