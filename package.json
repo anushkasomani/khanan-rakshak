@@ -1,0 +1,13 @@
+{
+  "name": "khanan-rakshak",
+  "private": true,
+  "description": "Builds the web app and the API together for deployment as one service.",
+  "scripts": {
+    "build": "npm ci --include=dev --prefix client && npm run build --prefix client && npm ci --include=dev --prefix server && npm run build --prefix server",
+    "start": "npm run start:prod --prefix server",
+    "seed": "npm run seed --prefix server"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

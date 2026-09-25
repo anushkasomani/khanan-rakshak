@@ -1,0 +1,16 @@
+# Local Postgres for development: `docker compose up -d db`.
+# Matches DATABASE_URL=postgresql://kr:kr@localhost:5433/khanan in server/.env.example.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: kr
+      POSTGRES_PASSWORD: kr
+      POSTGRES_DB: khanan
+    ports:
+      - '5433:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
